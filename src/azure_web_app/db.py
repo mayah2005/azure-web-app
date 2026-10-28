@@ -19,12 +19,7 @@ from ._constants import CONNECTION_STRING_VARIABLE
 
 def get_connection_string() -> str:
     """Read the connection string from the environment"""
-    
-    # On your laptop, create_app() loads it from your .secret.env file. On Azure,
-    # it comes from the environment variable you set in the portal.
-    # ======================= GUIDE HELPER: DELETE BEFORE YOU SUBMIT =======================
-    # These checks only exist to give you clearer error messages while you work
-    # through the guide. Delete everything between the two GUIDE HELPER lines.
+
     connection_string = os.environ.get(CONNECTION_STRING_VARIABLE)
     if not connection_string:
         raise RuntimeError(
@@ -32,18 +27,14 @@ def get_connection_string() -> str:
             "file is in the project root (next to pyproject.toml). On Azure, check the web "
             "app's environment variables."
         )
-    # mssql-python ships with its own driver and refuses connection strings that
-    # try to pick one. The string the Azure portal gives you was written for
-    # pyodbc, so it starts with Driver={...}.
+
     if "driver=" in connection_string.lower():
         raise RuntimeError(
             f"Delete the 'Driver={{ODBC Driver 18 for SQL Server}};' part of "
             f"{CONNECTION_STRING_VARIABLE}. mssql-python includes its own driver."
         )
-    # ===================================== END GUIDE HELPER =====================================
 
     return os.environ[CONNECTION_STRING_VARIABLE]
-
 
 class Database:
     """One connection to the database, plus a method for every query the app runs."""
@@ -61,17 +52,6 @@ class Database:
         """
         self.connection.close()
 
-    # Every method below follows the same pattern:
-    #   1. Open a cursor (the object you run queries through). The `with`
-    #      block closes it for us when we're done, even if something goes wrong.
-    #   2. Run the query, using ? placeholders for every value.
-    #   3. If the query changed anything (INSERT, UPDATE, DELETE), commit.
-    #      Nothing is saved until you commit!
-    #
-    # Why ? placeholders? The driver sends the values separately from the SQL,
-    # so a username like "x'; DROP TABLE Users; --" is treated as a weird
-    # username instead of as SQL. Never build SQL with f-strings.
-
     def username_exists(self, username: str) -> bool:
         """Return True if a user with this username is already in the database."""
         with self.connection.cursor() as cursor:
@@ -87,39 +67,27 @@ class Database:
                     (username, hashed_password, display_name),
                 )
             except mssql_python.IntegrityError:
-                # Register already checks username_exists first, so how could we
-                # get here? If two people register the same name at the same
-                # moment, both can pass that check before either INSERT runs. The
-                # UNIQUE constraint on the username column catches the second one.
                 self.connection.rollback()
                 return False
         self.connection.commit()
         return True
 
-    # ------------------------------------------------------------------------
-    # YOUR TASK (part 1 of 2): write get_login_info.
-    #
-    # It takes a username and returns the row for that user, or None if there
-    # is no such user. SELECT the columns Login needs: the password hash, the
-    # display name, and the last login time.
-    #
-    # fetchone() returns a row (or None). Rows from mssql-python let you use
-    # column names: row.display_name
-    #
-    # Bonus: also write update_last_login(username), which sets the user's
-    # last_login to the current time. Use GETDATE() in your SQL (so the time
-    # comes from the database's clock, like create_date does), and commit.
-    # ------------------------------------------------------------------------
+def get_login_info(self, username: str):
+    with self.connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT password, display_name, last_login FROM Users WHERE username = ?",
+            (username,),
+        )
+        return cursor.fetchone()
 
-    # def get_login_info(self, username: str):
-    #     ...
-
+def update_last_login(self, username: str) -> None:
+    """Set the user's last_login to the database's current time."""
+    with self.connection.cursor() as cursor:
+        cursor.execute("UPDATE Users SET last_login = GETDATE() WHERE username = ?", (username,))
+    self.connection.commit()
 
 def get_db() -> Database:
     """Return this request's Database, connecting on first use."""
-    # `g` is Flask's per-request storage (remember it from the API activity?).
-    # Anything we put on it disappears when the request ends, so each request
-    # gets its own Database, and requests never share one.
     if "db" not in g:
         g.db = Database(mssql_python.connect(get_connection_string()))
     return g.db
@@ -135,7 +103,6 @@ def close_db(exception: BaseException | None = None) -> None:
     db = g.pop("db", None)
     if db is not None:
         db.close()
-
 
 def setup_for_app(app: Flask) -> None:
     """Hook the database into the app. Call this from create_app()."""
