@@ -13,7 +13,7 @@
   <p>Good evening!</p>
  {% endif %}
  
- <p>I spend about {{ hours_per_week }} hours a week on {{ hobby }}.</p>
+ <p>I spend about {{ hours_per_week }} hours a week {{ hobby }}.</p>
  <p>That's about {{ (hours_per_week * 52 / 24) | round(1) }} days a year.</p>
  <p>Fun fact: {{ fun_fact | default("No fun fact yet!") }}</p>
  
