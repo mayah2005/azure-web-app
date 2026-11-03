@@ -8,9 +8,13 @@ Notice that there's no SQL in this file. Endpoints decide what should happen;
 the Database class in db.py does the talking to the database.
 """
 
-from flask import Flask, request
+from flask import Flask, g, request, make_response
 from flask_bcrypt import check_password_hash, generate_password_hash
 from flask_restful import Api, Resource
+from .sessions import clear_session_cookie, set_session_cookie, verify_session_cookie
+
+from .db import get_db
+
 
 from ._constants import (
     BAD_LOGIN_MESSAGE,
@@ -18,8 +22,9 @@ from ._constants import (
     MIN_PASSWORD_LENGTH,
     PASSWORD_PATTERN,
     USERNAME_PATTERN,
+    SESSION_COOKIE_NAME
 )
-from .db import get_db
+
 
 
 def get_json_body() -> dict:
@@ -128,8 +133,35 @@ class Login(Resource):
             when = last_login.strftime("%B %d, %Y at %I:%M %p")
             message = f"Welcome back, {display_name}! Your last login was {when} UTC."
 
-        return {"message": message, "displayName": display_name}, 200
+        session_id = db.create_session(login_info.userid)
+        response = make_response({"message": message, "displayName": login_info.display_name}, 200)
+        set_session_cookie(response, session_id)
+        return response
 
+class Logout(Resource):
+    def post(self):
+        # The browser sends our cookies automatically with every request,
+        # so the JavaScript doesn't have to do anything special.
+        session_id = verify_session_cookie(request.cookies.get(SESSION_COOKIE_NAME))
+        if session_id is not None:
+            get_db().delete_session(session_id)
+
+        # Clear the cookie even if the session was already gone, so the browser
+        # stops sending a cookie that doesn't work anymore.
+        response = make_response({"message": "Logged out"}, 200)
+        clear_session_cookie(response)
+        return response
+
+class LogoutEverywhere(Resource):
+    def post(self):
+        if g.current_user is None:
+            return {"message": "Not logged in"}, 401
+
+        get_db().delete_all_sessions(g.current_user.userid)
+
+        response = make_response({"message": "Logged out everywhere"}, 200)
+        clear_session_cookie(response)
+        return response
 
 def setup_auth(app: Flask) -> None:
     """Register the authentication endpoints with the app. Should be called when first creating the flask app"""
@@ -138,3 +170,5 @@ def setup_auth(app: Flask) -> None:
     api = Api(app)
     api.add_resource(Register, "/register")
     api.add_resource(Login, "/login")
+    api.add_resource(Logout, "/logout")
+    api.add_resource(LogoutEverywhere, "/logout-everywhere")

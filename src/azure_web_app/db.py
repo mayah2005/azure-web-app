@@ -14,7 +14,7 @@ import os
 import mssql_python
 from flask import Flask, g
 
-from ._constants import CONNECTION_STRING_VARIABLE
+from ._constants import CONNECTION_STRING_VARIABLE, SESSION_LIFETIME_SECONDS
 
 
 def get_connection_string() -> str:
@@ -72,26 +72,73 @@ class Database:
         self.connection.commit()
         return True
 
-def get_login_info(self, username: str):
-    with self.connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT password, display_name, last_login FROM Users WHERE username = ?",
-            (username,),
-        )
-        return cursor.fetchone()
+    def get_login_info(self, username: str):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT userid, password, display_name, last_login FROM Users WHERE username = ?",
+                (username,),
+            )
+            return cursor.fetchone()
 
-def update_last_login(self, username: str) -> None:
-    """Set the user's last_login to the database's current time."""
-    with self.connection.cursor() as cursor:
-        cursor.execute("UPDATE Users SET last_login = GETDATE() WHERE username = ?", (username,))
-    self.connection.commit()
+    def update_last_login(self, username: str) -> None:
+        """Set the user's last_login to the database's current time."""
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE Users SET last_login = GETDATE() WHERE username = ?", (username,))
+        self.connection.commit()
+
+    def create_session(self, user_id: int) -> str:
+        """Add a session for this user to the Sessions table and return its ID.
+
+        The database generates the ID (the NEWID() default on the sessionid
+        column), and OUTPUT INSERTED.sessionid hands it back to us.
+        """
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO Sessions (userid, expiry)
+                OUTPUT INSERTED.sessionid
+                VALUES (?, DATEADD(SECOND, ?, GETDATE()))
+                """,
+                (user_id, SESSION_LIFETIME_SECONDS),
+            )
+            # mssql-python gives us UNIQUEIDENTIFIER values as Python uuid.UUID
+            # objects, so we convert to a string before it goes in a cookie.
+            session_id = str(cursor.fetchone()[0])
+        self.connection.commit()
+        return session_id
+
+    def delete_session(self, session_id: str) -> None:
+        """Remove a session from the Sessions table."""
+        with self.connection.cursor() as cursor:
+            cursor.execute("DELETE FROM Sessions WHERE sessionid = ?", (session_id,))
+        self.connection.commit()
+
+    def delete_all_sessions(self, user_id: int) -> None:
+        with self.connection.cursor() as cursor:
+            cursor.execute("DELETE FROM Sessions WHERE userid = ?", (user_id,))
+        self.connection.commit()
+
+    def get_session_user(self, session_id: str):
+        """Return the logged-in user's info for a session, or None if the session doesn't exist."""
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT Users.userid, Users.username, Users.display_name, Users.last_login,
+                       Sessions.sessionid, Sessions.expiry
+                FROM Sessions
+                JOIN Users ON Users.userid = Sessions.userid
+                WHERE Sessions.sessionid = ?
+                """,
+                (session_id,),
+            )
+            return cursor.fetchone()
+
 
 def get_db() -> Database:
     """Return this request's Database, connecting on first use."""
     if "db" not in g:
         g.db = Database(mssql_python.connect(get_connection_string()))
     return g.db
-
 
 def close_db(exception: BaseException | None = None) -> None:
     """Close this request's Database, if the request opened one.

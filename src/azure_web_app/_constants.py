@@ -38,3 +38,8 @@ PASSWORD_PATTERN = re.compile(rf"[\x21-\x7E]{{{MIN_PASSWORD_LENGTH},}}")
 
 # Login uses the same message for "no such user" and "wrong password".
 BAD_LOGIN_MESSAGE = "Incorrect username or password"
+
+# Sessions
+APP_SECRET_VARIABLE = "APP_SECRET"
+SESSION_COOKIE_NAME = "sessionID"
+SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 7

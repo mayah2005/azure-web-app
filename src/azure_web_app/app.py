@@ -3,8 +3,9 @@ from datetime import datetime
 from dotenv import find_dotenv, load_dotenv
 from flask import Flask, abort, render_template
 
-from azure_web_app import auth, db
-from azure_web_app._constants import SECRET_ENV_FILE
+from azure_web_app import auth, db, sessions
+from ._constants import SECRET_ENV_FILE
+from .sessions import login_required
 
 FAVORITES = [
     {"id": 1, "title": "Honkai Star Rail", "why": "The animations are pretty and I enjoy turn-based combat"},
@@ -29,6 +30,7 @@ def create_app():
     load_dotenv(find_dotenv(SECRET_ENV_FILE))
     app = Flask(__name__)
     db.setup_for_app(app)
+    sessions.setup_sessions(app)
     auth.setup_auth(app)
     setup_routes(app)
     return app
@@ -51,10 +53,20 @@ def favorite_detail(favorite_id: int):
 def games():
     return render_template("games.html", games=GAMES, goal_hours=500)
 
+@login_required
+def account():
+    return render_template("account.html")
+
+@login_required
+def secret():
+    return render_template("secret.html")
+
 def setup_routes(app):
     app.route("/")(index)
     app.route("/favorites/<int:favorite_id>")(favorite_detail)
     app.route("/games")(games)
+    app.route("/account")(account)
+    app.route("/secret")(secret)
 
 def run_app(debug: bool = True) -> None:
     app = create_app()
